@@ -65,23 +65,6 @@ interface CryptoBubblePhysicsProps {
   getPriceChangeForTimeframe: (crypto: CryptoData) => number
 }
 
-interface BubblePhysics {
-  x: number
-  y: number
-  vx: number
-  vy: number
-  radius: number
-  crypto: CryptoData
-  percentChange: number
-}
-
-interface CryptoBubblePhysicsProps {
-  cryptoData: CryptoData[]
-  timeframe: "m5" | "h1" | "h6" | "h24"
-  onBubbleClick: (crypto: CryptoData) => void
-  getPriceChangeForTimeframe: (crypto: CryptoData) => number
-}
-
 export default function CryptoBubblePhysics({ 
   cryptoData, 
   timeframe, 
@@ -92,6 +75,7 @@ export default function CryptoBubblePhysics({
   const bubbles = useRef<BubblePhysics[]>([])
   const animationRef = useRef<number>(0)
   const imageCache = useRef<Map<string, HTMLImageElement | null>>(new Map())
+  const isInitializedRef = useRef<boolean>(false) // Track if initialization has happened
 
   // Get percentage change based on selected timeframe
   const getPercentageChange = useCallback(
@@ -108,13 +92,19 @@ export default function CryptoBubblePhysics({
       const canvas = canvasRef.current
       if (!canvas) return 40
       
+      // Check if we're on a mobile device
+      const isMobile = window.innerWidth < 768
+      
       // Calculate base size factor relative to canvas dimensions
       const canvasArea = canvas.width * canvas.height
       const scaleFactor = Math.sqrt(canvasArea) / 1000 // Normalize for a reference 1000x1000 screen
       
-      // Calculate minimum and maximum bubble sizes based on screen dimensions
-      const minSize = 30 * scaleFactor
-      const maxSize = 70 * scaleFactor
+      // Fine-tuned sizing for mobile - just slightly larger than desktop
+      const minSize = isMobile ? 30 * scaleFactor : 30 * scaleFactor
+      const maxSize = isMobile ? 70 * scaleFactor : 70 * scaleFactor
+      
+      // Smaller boost to avoid making bubbles too big
+      const mobileBoost = isMobile ? 10 : 0
       
       // Calculate the absolute percentage change (we care about magnitude, not direction)
       const absChange = Math.abs(percentChange)
@@ -129,14 +119,16 @@ export default function CryptoBubblePhysics({
       // Using a mix of linear and square root to create a slight curve
       const normalizedSize = Math.sqrt(sizeRatio) * 0.7 + sizeRatio * 0.3
       
-      // Calculate final size between min and max
-      const size = minSize + normalizedSize * (maxSize - minSize)
+      // Calculate final size between min and max, add the mobile boost
+      const size = minSize + normalizedSize * (maxSize - minSize) + mobileBoost
       
       return size
     },
-    [/* dependencies removed for brevity */],
-  )  
+    [],
+  )
 
+
+  // Image loading effect
   useEffect(() => {
     cryptoData.forEach((crypto) => {
       // This condition needs to be fixed to properly detect image changes
@@ -169,195 +161,246 @@ export default function CryptoBubblePhysics({
         img.src = crypto.image;
       }
     });
-  }, [cryptoData]); // Re-run when cryptoData changes  // Initialize canvas and animation
+  }, [cryptoData]); // Re-run when cryptoData changes
+  // Modified initialization and update function
+  const initializeOrUpdateBubbles = useCallback(() => {
+    if (!canvasRef.current || cryptoData.length === 0) return;
+    
+    const canvas = canvasRef.current;
+    
+    // Create symbol-based lookup maps for faster reference
+    const cryptoBySymbol = new Map(
+      cryptoData.map(crypto => [crypto.symbol, crypto])
+    );
+    
+    // Only do full initialization if this is first render
+    if (!isInitializedRef.current || bubbles.current.length === 0) {
+      // Initial creation of bubbles (first render)
+      bubbles.current = cryptoData.map((crypto) => {
+        const percentChange = getPercentageChange(crypto);
+        const radius = getBubbleSize(percentChange, cryptoData);
+        
+        const margin = radius * 1.2;
+        const availableWidth = canvas.width - margin * 2;
+        const availableHeight = canvas.height - margin * 2;
+        
+        return {
+          x: margin + Math.random() * availableWidth,
+          y: margin + Math.random() * availableHeight,
+          vx: (Math.random() - 0.5) * 0.5,
+          vy: (Math.random() - 0.5) * 0.5,
+          radius,
+          crypto,
+          percentChange,
+        };
+      });
+      
+      isInitializedRef.current = true;
+    } else {
+      // For subsequent updates, create a map of existing bubbles by symbol
+      const existingBubblesMap = new Map(
+        bubbles.current.map(bubble => [bubble.crypto.symbol, bubble])
+      );
+      
+      // Create a set to track which bubbles are still in the data
+      const updatedSymbols = new Set<string>();
+      
+      // Update existing bubbles in-place without recreating the array
+      bubbles.current.forEach(bubble => {
+        const symbol = bubble.crypto.symbol;
+        const newCryptoData = cryptoBySymbol.get(symbol);
+        
+        if (newCryptoData) {
+          // Update the crypto data without changing position or velocity
+          const percentChange = getPercentageChange(newCryptoData);
+          const radius = getBubbleSize(percentChange, cryptoData);
+          
+          // Update bubble properties but keep position and velocity
+          bubble.crypto = newCryptoData;
+          bubble.percentChange = percentChange;
+          bubble.radius = radius;
+          
+          // Mark this symbol as updated
+          updatedSymbols.add(symbol);
+        }
+      });
+      
+      // Add new bubbles that don't exist yet
+      const newBubbles = cryptoData
+        .filter(crypto => !existingBubblesMap.has(crypto.symbol))
+        .map(crypto => {
+          const percentChange = getPercentageChange(crypto);
+          const radius = getBubbleSize(percentChange, cryptoData);
+          
+          const margin = radius * 1.2;
+          const availableWidth = canvas.width - margin * 2;
+          const availableHeight = canvas.height - margin * 2;
+          
+          return {
+            x: margin + Math.random() * availableWidth,
+            y: margin + Math.random() * availableHeight,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: (Math.random() - 0.5) * 0.5,
+            radius,
+            crypto,
+            percentChange,
+          };
+        });
+      
+      // Add new bubbles to the existing array
+      if (newBubbles.length > 0) {
+        bubbles.current.push(...newBubbles);
+      }
+      
+      // Remove bubbles that no longer exist in the data
+      bubbles.current = bubbles.current.filter(bubble => 
+        updatedSymbols.has(bubble.crypto.symbol) || 
+        cryptoBySymbol.has(bubble.crypto.symbol)
+      );
+    }
+  }, [cryptoData, getBubbleSize, getPercentageChange]);
+  // Use a separate effect for canvas resize that doesn't depend on cryptoData
   useEffect(() => {
-    if (!canvasRef.current || cryptoData.length === 0) return
-  
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-  
-    // Initialize bubbles - modified to preserve positions
-    const initBubbles = () => {
-      // If bubbles already exist, preserve their positions and physical properties
-      if (bubbles.current.length > 0) {
-        // Create a map of existing bubbles by crypto ID for quick lookup
-        const existingBubblesMap = new Map(
-          bubbles.current.map(bubble => [bubble.crypto.id, bubble])
-        );
-  
-        bubbles.current = cryptoData.map((crypto) => {
-          const percentChange = getPercentageChange(crypto)
-          const radius = getBubbleSize(percentChange, cryptoData)
-          
-          // If we already have this bubble, preserve its position and velocity
-          const existingBubble = existingBubblesMap.get(crypto.id);
-          if (existingBubble) {
-            return {
-              ...existingBubble,
-              radius, // Update radius in case percentage changed
-              crypto, // Update with latest crypto data (including image)
-              percentChange, // Update percentage change
-            };
-          }
-          
-          // For new bubbles, initialize with random position
-          const margin = radius * 1.2
-          const availableWidth = canvas.width - margin * 2
-          const availableHeight = canvas.height - margin * 2
-          
-          return {
-            x: margin + Math.random() * availableWidth,
-            y: margin + Math.random() * availableHeight,
-            vx: (Math.random() - 0.5) * 0.5,
-            vy: (Math.random() - 0.5) * 0.5,
-            radius,
-            crypto,
-            percentChange,
-          }
-        })
-      } else {
-        // Initial creation of bubbles (first render)
-        bubbles.current = cryptoData.map((crypto) => {
-          const percentChange = getPercentageChange(crypto)
-          const radius = getBubbleSize(percentChange, cryptoData)
-          
-          const margin = radius * 1.2
-          const availableWidth = canvas.width - margin * 2
-          const availableHeight = canvas.height - margin * 2
-          
-          return {
-            x: margin + Math.random() * availableWidth,
-            y: margin + Math.random() * availableHeight,
-            vx: (Math.random() - 0.5) * 0.5,
-            vy: (Math.random() - 0.5) * 0.5,
-            radius,
-            crypto,
-            percentChange,
-          }
-        })
-      }
-    }
-
-    // Set canvas dimensions
     const resizeCanvas = () => {
+      const canvas = canvasRef.current;
       if (canvas) {
-        const rect = canvas.getBoundingClientRect()
-        canvas.width = rect.width
-        canvas.height = rect.height
-
-        // Reinitialize bubbles when canvas is resized
-        initBubbles()
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+        
+        // Only re-initialize if we haven't done so yet or if we need to adjust for new dimensions
+        if ((!isInitializedRef.current || bubbles.current.length === 0) && cryptoData.length > 0) {
+          initializeOrUpdateBubbles();
+        }
       }
+    };
+    
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+    
+    return () => {
+      window.removeEventListener("resize", resizeCanvas);
+    };
+  }, [cryptoData.length, initializeOrUpdateBubbles]);
+
+  // Effect to update bubbles data without redrawing
+  useEffect(() => {
+    // Update bubble data without resetting positions
+    if (cryptoData.length > 0) {
+      initializeOrUpdateBubbles();
     }
-
-    resizeCanvas()
-    window.addEventListener("resize", resizeCanvas)
-
-    // Initialize bubbles
-    initBubbles()
-
+  }, [cryptoData, initializeOrUpdateBubbles]);
+  // Animation and rendering effect - this should not depend on cryptoData
+  // so it doesn't restart the animation on data changes
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    
     // Animation loop
     const animate = () => {
-      if (!ctx || !canvas) return
+      if (!ctx || !canvas) return;
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // Update and draw each bubble
       bubbles.current.forEach((bubble, index) => {
         // Update position
-        bubble.x += bubble.vx
-        bubble.y += bubble.vy
+        bubble.x += bubble.vx;
+        bubble.y += bubble.vy;
 
         // Boundary collision
         if (bubble.x - bubble.radius < 0 || bubble.x + bubble.radius > canvas.width) {
-          bubble.vx *= -0.8
-          bubble.x = Math.max(bubble.radius, Math.min(canvas.width - bubble.radius, bubble.x))
+          bubble.vx *= -0.8;
+          bubble.x = Math.max(bubble.radius, Math.min(canvas.width - bubble.radius, bubble.x));
         }
 
         if (bubble.y - bubble.radius < 0 || bubble.y + bubble.radius > canvas.height) {
-          bubble.vy *= -0.8
-          bubble.y = Math.max(bubble.radius, Math.min(canvas.height - bubble.radius, bubble.y))
+          bubble.vy *= -0.8;
+          bubble.y = Math.max(bubble.radius, Math.min(canvas.height - bubble.radius, bubble.y));
         }
 
         // Apply friction
-        bubble.vx *= 0.99
-        bubble.vy *= 0.99
+        bubble.vx *= 0.99;
+        bubble.vy *= 0.99;
 
         // Add slight random movement
         if (Math.random() < 0.05) {
-          bubble.vx += (Math.random() - 0.5) * 0.2
-          bubble.vy += (Math.random() - 0.5) * 0.2
+          bubble.vx += (Math.random() - 0.5) * 0.2;
+          bubble.vy += (Math.random() - 0.5) * 0.2;
         }
 
         // Bubble collision
         for (let j = index + 1; j < bubbles.current.length; j++) {
-          const other = bubbles.current[j]
-          const dx = other.x - bubble.x
-          const dy = other.y - bubble.y
-          const distance = Math.sqrt(dx * dx + dy * dy)
-          const minDistance = bubble.radius + other.radius
+          const other = bubbles.current[j];
+          const dx = other.x - bubble.x;
+          const dy = other.y - bubble.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const minDistance = bubble.radius + other.radius;
 
           if (distance < minDistance) {
             // Calculate collision response
-            const angle = Math.atan2(dy, dx)
-            const targetX = bubble.x + Math.cos(angle) * minDistance
-            const targetY = bubble.y + Math.sin(angle) * minDistance
-            const ax = (targetX - other.x) * 0.05
-            const ay = (targetY - other.y) * 0.05
+            const angle = Math.atan2(dy, dx);
+            const targetX = bubble.x + Math.cos(angle) * minDistance;
+            const targetY = bubble.y + Math.sin(angle) * minDistance;
+            const ax = (targetX - other.x) * 0.05;
+            const ay = (targetY - other.y) * 0.05;
 
-            bubble.vx -= ax
-            bubble.vy -= ay
-            other.vx += ax
-            other.vy += ay
+            bubble.vx -= ax;
+            bubble.vy -= ay;
+            other.vx += ax;
+            other.vy += ay;
           }
         }
+        
         // Draw bubble
-        const isPositive = bubble.percentChange >= 0
-        const absChange = Math.abs(bubble.percentChange)
-        const isNearZero = absChange < 0.5  // Slightly narrower range for zero
+        const isPositive = bubble.percentChange >= 0;
+        const absChange = Math.abs(bubble.percentChange);
+        const isNearZero = absChange < 0.5;  // Slightly narrower range for zero
 
         // Analyze the distribution to identify outliers
-        const percentChanges = bubbles.current.map(b => Math.abs(b.percentChange))
-        const sortedChanges = [...percentChanges].sort((a, b) => a - b)
-        const maxChange = Math.max(...percentChanges)
-        const minChange = Math.min(...percentChanges)
-        const avgChange = percentChanges.reduce((sum, val) => sum + val, 0) / percentChanges.length
-        const dataRange = maxChange - minChange
+        const percentChanges = bubbles.current.map(b => Math.abs(b.percentChange));
+        const sortedChanges = [...percentChanges].sort((a, b) => a - b);
+        const maxChange = Math.max(...percentChanges);
+        const minChange = Math.min(...percentChanges);
+        const avgChange = percentChanges.reduce((sum, val) => sum + val, 0) / percentChanges.length;
+        const dataRange = maxChange - minChange;
 
         // Determine if values are close together
-        const valuesAreClose = dataRange < avgChange * 0.5
+        const valuesAreClose = dataRange < avgChange * 0.5;
 
         // Find the largest gap in the data
-        const startIndex = Math.max(1, Math.floor(sortedChanges.length * 0.1))
-        let maxGap = 0
+        const startIndex = Math.max(1, Math.floor(sortedChanges.length * 0.1));
+        let maxGap = 0;
         for (let i = startIndex; i < sortedChanges.length; i++) {
-          const gap = sortedChanges[i] - sortedChanges[i-1]
+          const gap = sortedChanges[i] - sortedChanges[i-1];
           if (gap > maxGap) {
-            maxGap = gap
+            maxGap = gap;
           }
         }
 
         // Determine if we have significant gaps in the data
-        const hasSignificantGaps = maxGap > dataRange * 0.2
+        const hasSignificantGaps = maxGap > dataRange * 0.2;
 
         // Calculate gap threshold and outlier factor
         const gapThreshold = hasSignificantGaps ? 
-          sortedChanges[sortedChanges.length - 1] - maxGap : maxChange
-        let outlierFactor = 0
+          sortedChanges[sortedChanges.length - 1] - maxGap : maxChange;
+        let outlierFactor = 0;
 
         if (hasSignificantGaps && !valuesAreClose && absChange > gapThreshold) {
-          outlierFactor = Math.min(1, (absChange - gapThreshold) / maxGap)
+          outlierFactor = Math.min(1, (absChange - gapThreshold) / maxGap);
         }
 
         // Calculate intensity based on both percentage change and outlier factor
-        const intensity = Math.min(0.8, (absChange / maxChange) * 0.6 + outlierFactor * 0.4)
+        const intensity = Math.min(0.8, (absChange / maxChange) * 0.6 + outlierFactor * 0.4);
 
         // Calculate normalized percentage change on a scale of -1 to 1
         // where -1 is the most negative, 0 is neutral, and 1 is the most positive
         const normalizedChange = isPositive 
           ? Math.min(1, bubble.percentChange / 10) // Cap at 10% for positive
-          : Math.max(-1, bubble.percentChange / 10) // Cap at -10% for negative
+          : Math.max(-1, bubble.percentChange / 10); // Cap at -10% for negative
 
         // Determine glow color based on the normalized change using a gradient
         let glowColor;
@@ -435,31 +478,39 @@ export default function CryptoBubblePhysics({
         ctx.lineWidth = glowSize;
         ctx.stroke();
         // Reset shadow for text and image
-        ctx.shadowBlur = 0
-        
+        ctx.shadowBlur = 0;
         // Draw crypto icon if available - positioned above the text
         // Increase icon spacing - move it higher in the bubble
-        const img = imageCache.current.get(bubble.crypto.id)
+        const img = imageCache.current.get(bubble.crypto.id);
         if (img && img.complete && img.naturalHeight !== 0) {
           try {
-            const iconSize = bubble.radius * 0.5
+            // Increase icon size for mobile
+            const isMobile = window.innerWidth < 768;
+            let iconSize = isMobile ? bubble.radius * 0.7 : bubble.radius * 0.5;
+
+              // Special handling for tiny bubbles on mobile - ensure minimum readable size
+            if (isMobile && bubble.radius < 35) {
+              iconSize = Math.max(iconSize, 20); // Ensure at least 20px for tiny bubbles on mobile
+            }
+                    
+            // Position the icon higher in the bubble on mobile for better spacing
+            const iconYOffset = isMobile ? bubble.radius * 0.45 : bubble.radius * 0.4;
+            
             ctx.drawImage(
               img,
               bubble.x - iconSize / 2,
-              bubble.y - iconSize / 2 - bubble.radius * 0.4,
+              bubble.y - iconSize / 2 - iconYOffset,
               iconSize,
               iconSize,
-            )
+            );
           } catch (error) {
-            // console.error(`Failed to draw image for ${bubble.crypto.symbol}:`, error)
-            // Don't set to null, just log the error
-            // imageCache.current.set(bubble.crypto.id, null)
+            // Error handling remains the same
           }
         }
 
-        ctx.fillStyle = "#ffffff"
-        ctx.textAlign = "center"
-        ctx.textBaseline = "middle"
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
         
         // Get the symbol text and prepare percentage text
         const symbolText = bubble.crypto.symbol.toUpperCase();
@@ -470,19 +521,20 @@ export default function CryptoBubblePhysics({
         const symbolLength = symbolText.length;
         
         // Calculate base size proportional to bubble radius - maintain proportionality for larger bubbles
-        let symbolFontSize = bubble.radius / 3;
+        let symbolFontSize = isMobile ? bubble.radius / 2.5 : bubble.radius / 3;
         
-        // More aggressive scaling for longer tokens
+        // Adjust scaling for longer tokens
         if (symbolLength > 3) {
-          // Use a progressive scaling formula: longer text gets more aggressive reduction
-          const scaleFactor = Math.max(0.6, 4 / (symbolLength + 1));
+          // Less aggressive reduction for mobile
+          const scaleFactor = isMobile 
+            ? Math.max(0.7, 4 / (symbolLength + 1)) 
+            : Math.max(0.6, 4 / (symbolLength + 1));
           symbolFontSize = symbolFontSize * scaleFactor;
         }
         
         // More aggressive mobile reduction for small bubbles
         if (isMobile) {
-          // Apply more reduction for small bubbles than large ones
-          const mobileScaleFactor = bubble.radius < 30 ? 0.65 : (bubble.radius < 45 ? 0.75 : 0.85);
+          const mobileScaleFactor = bubble.radius < 30 ? 0.8 : (bubble.radius < 45 ? 0.85 : 0.9);
           symbolFontSize = symbolFontSize * mobileScaleFactor;
         }
         
@@ -492,94 +544,112 @@ export default function CryptoBubblePhysics({
         }
         
         // Dynamic minimum size based on bubble size
-        const dynamicMinSize = Math.max(6, bubble.radius / 6);
-        const minSymbolSize = isMobile ? dynamicMinSize : Math.max(8, dynamicMinSize);
+        const dynamicMinSize = Math.max(isMobile ? 8 : 6, bubble.radius / 6);
+        const minSymbolSize = isMobile ? Math.max(10, dynamicMinSize) : Math.max(8, dynamicMinSize);
         
         // Dynamic maximum size based on bubble size
-        const dynamicMaxSize = bubble.radius / 2.5;
+        const dynamicMaxSize = isMobile ? bubble.radius / 2.2 : bubble.radius / 2.5;
         
         // Apply min/max constraints
         symbolFontSize = Math.min(dynamicMaxSize, Math.max(minSymbolSize, symbolFontSize));
+
+        // Add text shadow for better contrast and readability
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
         
         // Apply font setting for symbol
-        ctx.font = `bold ${symbolFontSize}px Arial`;
+        ctx.font = `${isMobile ? '700' : 'bold'} ${symbolFontSize}px Arial`;
         
-        // For very small bubbles with long text, consider showing only first 3-4 letters
-        if (bubble.radius < 20 && symbolLength > 4 && isMobile) {
-          // Show abbreviated symbol (first 3 chars + …)
-          ctx.fillText(symbolText.slice(0, 3) + "…", bubble.x, bubble.y + bubble.radius * 0.05);
+        // For small bubbles with long text, show only first 3 chars on mobile
+        if ((bubble.radius < 25 && symbolLength > 4 && isMobile) || (bubble.radius < 20 && symbolLength > 3)) {
+          // Show abbreviated symbol with proper positioning
+          ctx.fillText(symbolText.slice(0, 3) + "…", bubble.x, bubble.y);
         } else {
-          ctx.fillText(symbolText, bubble.x, bubble.y + bubble.radius * 0.05);
+          // Adjust Y positioning for better spacing with percentage
+          const symbolYOffset = isMobile ? bubble.radius * 0.0 : bubble.radius * 0.05;
+          ctx.fillText(symbolText, bubble.x, bubble.y + symbolYOffset);
         }
         
-        // For percentage text - size relative to symbol but with tighter bounds
-        let percentFontSize = Math.min(symbolFontSize * 0.9, symbolFontSize - 1);
+       // For percentage text - increase size ratio for mobile
+        let percentFontSize = isMobile 
+        ? Math.min(symbolFontSize * 0.95, symbolFontSize - 1)
+        : Math.min(symbolFontSize * 0.9, symbolFontSize - 1);
         
-        // Ensure percentage text is not too small
-        const minPercentSize = Math.max(5, minSymbolSize * 0.8);
+        // Increase minimum size for percentage on mobile
+        const minPercentSize = Math.max(isMobile ? 8 : 5, minSymbolSize * (isMobile ? 0.9 : 0.8));
         percentFontSize = Math.max(minPercentSize, percentFontSize);
         
         // Apply font setting for percentage
         ctx.font = `${percentFontSize}px Arial`;
         
-        // Position percentage text - move closer to center for very small bubbles
-        const percentYOffset = bubble.radius < 25 ? bubble.radius * 0.45 : bubble.radius * 0.55;
+        // Position percentage text with better spacing on mobile
+        const percentYOffset = isMobile 
+          ? (bubble.radius < 25 ? bubble.radius * 0.4 : bubble.radius * 0.5)
+          : (bubble.radius < 25 ? bubble.radius * 0.45 : bubble.radius * 0.55);
         ctx.fillText(percentText, bubble.x, bubble.y + percentYOffset);
-      })
-      animationRef.current = requestAnimationFrame(animate)
-    }
 
-    animate()
+        // Reset shadow for subsequent rendering
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      });
+      
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animate();
 
     // Handle canvas click for bubble selection and repulsion
     const handleCanvasClick = (e: MouseEvent) => {
-      if (!canvas) return
+      if (!canvas) return;
 
-      const rect = canvas.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
 
       // Check if clicked on a bubble
-      let clickedOnBubble = false
+      let clickedOnBubble = false;
 
       for (const bubble of bubbles.current) {
-        const dx = bubble.x - x
-        const dy = bubble.y - y
-        const distance = Math.sqrt(dx * dx + dy * dy)
+        const dx = bubble.x - x;
+        const dy = bubble.y - y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance < bubble.radius) {
-          onBubbleClick(bubble.crypto)
-          clickedOnBubble = true
-          break
+          onBubbleClick(bubble.crypto);
+          clickedOnBubble = true;
+          break;
         }
       }
 
       // If clicked on empty space, apply repulsion
       if (!clickedOnBubble) {
         bubbles.current.forEach((bubble) => {
-          const dx = bubble.x - x
-          const dy = bubble.y - y
-          const distance = Math.sqrt(dx * dx + dy * dy)
+          const dx = bubble.x - x;
+          const dy = bubble.y - y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
 
           // Apply force inversely proportional to distance
-          const force = 200 / Math.max(1, distance)
-          const angle = Math.atan2(dy, dx)
+          const force = 200 / Math.max(1, distance);
+          const angle = Math.atan2(dy, dx);
 
-          bubble.vx += Math.cos(angle) * force
-          bubble.vy += Math.sin(angle) * force
-        })
+          bubble.vx += Math.cos(angle) * force;
+          bubble.vy += Math.sin(angle) * force;
+        });
       }
-    }
+    };
 
-    canvas.addEventListener("click", handleCanvasClick)
+    canvas.addEventListener("click", handleCanvasClick);
 
     // Clean up
     return () => {
-      window.removeEventListener("resize", resizeCanvas)
-      canvas.removeEventListener("click", handleCanvasClick)
-      cancelAnimationFrame(animationRef.current)
-    }
-  }, [cryptoData, getPercentageChange, getBubbleSize, onBubbleClick])
+      canvas.removeEventListener("click", handleCanvasClick);
+      cancelAnimationFrame(animationRef.current);
+    };
+  }, [onBubbleClick]);  // Remove cryptoData from dependencies to prevent animation restart
 
-  return <canvas ref={canvasRef} className="w-full h-full cursor-pointer" />
+  return <canvas ref={canvasRef} className="w-full h-full cursor-pointer" />;
 }

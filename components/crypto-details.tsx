@@ -108,9 +108,6 @@ export default function CryptoDetails({ crypto, timeframe, onClose, shareToTwitt
               <div>
                 <CardTitle>{crypto.name}</CardTitle>
                 <CardDescription className="text-blue-300">
-                  {crypto.symbol.toUpperCase()}
-                </CardDescription>
-                <CardDescription className="text-blue-300/70 text-xs mt-1 font-mono">
                   CA: {crypto.id}
                 </CardDescription>
               </div>

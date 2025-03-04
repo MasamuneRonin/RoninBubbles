@@ -5,7 +5,7 @@ import { AnimatePresence } from "framer-motion"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Search, X } from "lucide-react"
+import { Search, X, Info } from "lucide-react"
 import CryptoDetails from "@/components/crypto-details"
 import { Skeleton } from "@/components/ui/skeleton"
 import CryptoBubblePhysics from "@/components/crypto-bubble-physics"
@@ -327,56 +327,88 @@ export default function CryptoBubbles() {
         };
       });
 
-      // Update state in a way that preserves bubble positions for unchanged tokens
       setCryptoData(prevData => {
-        // Merge new data with existing data
-        return transformedData.map(newToken => {
-          const existingToken = prevData.find(t => t.symbol === newToken.symbol);
+        // Create a map of new data by symbol for efficient lookup
+        const newTokensMap = transformedData.reduce((map, token) => {
+          map[token.symbol] = token;
+          return map;
+        }, {} as Record<string, any>);
+        
+        // First, update existing tokens while preserving their position in the array
+        const updatedExistingTokens = prevData.map(existingToken => {
+          const newToken = newTokensMap[existingToken.symbol];
           
-          // If token exists and has the same price/volume, preserve it exactly
-          // This helps keep bubble positions stable for unchanged tokens
-          if (existingToken && 
-              existingToken.current_price === newToken.current_price &&
-              existingToken.volume_h24 === newToken.volume_h24) {
-            return existingToken;
-          }
+          // If this token doesn't exist in new data, keep it unchanged
+          if (!newToken) return existingToken;
           
-          // For changed tokens or new tokens, use the new data
-          // but preserve any custom image that was already loaded
+          // Preserve the existing token's position by updating only its data properties
+          // We keep the same object reference to help physics engine maintain position
           return {
-            ...newToken,
-            image: (existingToken && existingToken.image !== '/token_logo.png') 
-            ? existingToken?.image 
+            ...existingToken,                         // Keep original properties (esp. position-related data)
+            current_price: newToken.current_price,    // Update price
+            price_change_percentage_m5: newToken.price_change_percentage_m5,
+            price_change_percentage_h1: newToken.price_change_percentage_h1,
+            price_change_percentage_h6: newToken.price_change_percentage_h6,
+            price_change_percentage_h24: newToken.price_change_percentage_h24,
+            market_cap: newToken.market_cap,
+            fdv_usd: newToken.fdv_usd,
+            volume_m5: newToken.volume_m5,
+            volume_h1: newToken.volume_h1,
+            volume_h6: newToken.volume_h6,
+            volume_h24: newToken.volume_h24,
+            total_volume: newToken.total_volume,
+            transactions_m5: newToken.transactions_m5,
+            transactions_h1: newToken.transactions_h1,
+            transactions_h6: newToken.transactions_h6,
+            transactions_h24: newToken.transactions_h24,
+            reserve_in_usd: newToken.reserve_in_usd,
+            pair_name: newToken.pair_name,
+            pool_count: newToken.pool_count,
+            // Keep existing image unless it's the default
+            image: (existingToken.image !== '/token_logo.png')
+              ? existingToken.image
               : newToken.image
           };
         });
-      });
-
-      // Only try to load images for tokens that still have fallback images
-      transformedData.forEach(token => {
-        if (token.baseTokenId) {
-          const tokenAddress = token.baseTokenId.split('_')[1];
-          
-          // First check if this token already has a custom image
-          const existingToken = cryptoData.find(t => t.id === token.id);
-          const hasCustomImage = existingToken && existingToken.image !== '/token_logo.png';
-          
-          // Only attempt to load images for tokens still using fallback image
-          if (!hasCustomImage) {
-            tokenImageService.getTokenImageUrl(tokenAddress, (imageUrl) => {
-              setCryptoData(prevData => {
-                const tokenIndex = prevData.findIndex((t: CryptoData) => t.id === token.id);
-                // Only update if we found the token and the image would change
-                if (tokenIndex >= 0 && prevData[tokenIndex].image !== imageUrl) {
-                  const newData = [...prevData];
-                  newData[tokenIndex] = {...newData[tokenIndex], image: imageUrl};
-                  return newData;
-                }
-                return prevData;
+        
+        // Find any new tokens that don't exist in the current data
+        const existingSymbols = new Set(prevData.map(token => token.symbol));
+        const brandNewTokens = transformedData.filter(token => !existingSymbols.has(token.symbol));
+        
+        // Create the final updated state with existing and new tokens
+        const updatedData = [...updatedExistingTokens, ...brandNewTokens];
+        
+        // Schedule image loading after the state update is processed
+        setTimeout(() => {
+          // Try to load custom images for ALL tokens in the updated data
+          updatedData.forEach(token => {
+            // Skip tokens that already have custom images
+            if (token.image !== '/token_logo.png') return;
+            
+            // Get the baseTokenId from the corresponding transformedData item if available
+            const sourceToken = newTokensMap[token.symbol] || 
+                                transformedData.find(t => t.symbol === token.symbol);
+            
+            if (sourceToken?.baseTokenId) {
+              const tokenAddress = sourceToken.baseTokenId.split('_')[1];
+              
+              tokenImageService.getTokenImageUrl(tokenAddress, (imageUrl) => {
+                setCryptoData(currentData => {
+                  const tokenIndex = currentData.findIndex((t: CryptoData) => t.id === token.id);
+                  // Only update if we found the token and the image would change
+                  if (tokenIndex >= 0 && currentData[tokenIndex].image !== imageUrl) {
+                    const newData = [...currentData];
+                    newData[tokenIndex] = {...newData[tokenIndex], image: imageUrl};
+                    return newData;
+                  }
+                  return currentData;
+                });
               });
-            });
-          }
-        }
+            }
+          });
+        }, 0);
+        
+        return updatedData;
       });
 
     } catch (error) {
@@ -797,9 +829,19 @@ export default function CryptoBubbles() {
           </div>
           
           {/* Mobile description - only visible on small screens */}
-          <CardDescription className="sm:hidden text-blue-300 mt-1 mb-3 text-sm"> {/* Added bottom margin */}
-            <span className="font-semibold">Ronin Tokens Performance ({formatTimeframe(timeframe)})</span>. Bubble size represents the magnitude of price change. Click empty space to repel bubbles. Click on a bubble for details.
-          </CardDescription>
+          <div className="sm:hidden relative mt-1 mb-3">
+            <div className="inline-flex items-center group">
+              <span className="text-blue-300 text-sm font-semibold">Ronin Tokens Performance ({formatTimeframe(timeframe)})</span>
+              <div className="relative inline-block ml-1.5">
+                <Info className="h-4 w-4 text-blue-300 cursor-help" />
+                <div className="invisible group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 -translate-y-2 
+                              w-64 p-2 bg-blue-950 text-blue-100 text-xs rounded shadow-lg border border-blue-700
+                              opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-50">
+                  Bubble size represents the magnitude of price change. Click empty space to repel bubbles. Click on a bubble for details.
+                </div>
+              </div>
+            </div>
+          </div>
 
           {/* Refresh timer - just the progress bar */}
           <div className="text-blue-300 mt-0">
