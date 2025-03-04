@@ -137,230 +137,386 @@ export default function CryptoBubbles() {
   const [selectedCrypto, setSelectedCrypto] = useState<CryptoData | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(true)
+  const [showUpOnly, setShowUpOnly] = useState(false)
+  const [showDownOnly, setShowDownOnly] = useState(false)
+  const [tokenLimit, setTokenLimit] = useState<10 | 25 | 50 | 100>(50) // Changed default to 50
+  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState(30)
+  const [refreshing, setRefreshing] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  // Fetch crypto data
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true)
 
-        // Create an array of promises for fetching all 10 pages
-        const pagePromises = []
-        for (let page = 1; page <= 5; page++) {
-          pagePromises.push(
-            fetch(`https://api.geckoterminal.com/api/v2/networks/ronin/pools?page=${page}`)
-              .then(response => {
-                if (!response.ok) throw new Error(`Failed to fetch page ${page}`)
-                return response.json()
-              })
-              .catch(error => {
-                console.warn(`Error fetching page ${page}:`, error)
-                return { data: [] } // Return empty data for failed pages
-              })
-          )
+  // Create a separate fetchData function with improved refresh behavior
+  const fetchData = async () => {
+    try {
+      // Don't set loading to true on refresh - keep current data visible
+      if (cryptoData.length === 0) {
+        setLoading(true)
+      }
+
+      // Create an array of promises for fetching all pages
+      const pagePromises = []
+      for (let page = 1; page <= 5; page++) {
+        pagePromises.push(
+          fetch(`https://api.geckoterminal.com/api/v2/networks/ronin/pools?page=${page}`)
+            .then(response => {
+              if (!response.ok) throw new Error(`Failed to fetch page ${page}`)
+              return response.json()
+            })
+            .catch(error => {
+              console.warn(`Error fetching page ${page}:`, error)
+              return { data: [] } // Return empty data for failed pages
+            })
+        )
+      }
+
+      // Wait for all page requests to complete
+      const pagesData = await Promise.all(pagePromises)
+
+      // Combine all pool data from all pages
+      const allPoolsData: GeckoPoolData[] = []
+      pagesData.forEach((pageResponse: { data?: GeckoPoolData[] }) => {
+        if (pageResponse.data && Array.isArray(pageResponse.data)) {
+          allPoolsData.push(...pageResponse.data)
+        }
+      })
+
+      // console.log(`Fetched ${allPoolsData.length} pools from ${pagesData.length} pages`)
+
+      // Group pools by base token symbol
+      const tokenMap = new Map<string, GeckoPoolData[]>()
+
+      allPoolsData.forEach(pool => {
+        // Extract base token symbol from pool name
+        const nameParts = pool.attributes.name.split(' / ')
+        const baseSymbol = nameParts[0]
+
+        if (!tokenMap.has(baseSymbol)) {
+          tokenMap.set(baseSymbol, [])
         }
 
-        // Wait for all page requests to complete
-        const pagesData = await Promise.all(pagePromises)
+        tokenMap.get(baseSymbol)!.push(pool)
+      })
 
-        // Combine all pool data from all pages
-        const allPoolsData: GeckoPoolData[] = []
-        pagesData.forEach((pageResponse: { data?: GeckoPoolData[] }) => {
-          if (pageResponse.data && Array.isArray(pageResponse.data)) {
-            allPoolsData.push(...pageResponse.data)
+      // Calculate average metrics for each unique token
+      const transformedData = Array.from(tokenMap.entries()).map(([symbol, pools]) => {
+        const poolCount = pools.length;
+
+        // Calculate average values across all pools
+        const avgPrice = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.base_token_price_usd || '0'), 0) / poolCount
+  
+        const avgChangeM5 = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.price_change_percentage.m5 || '0'), 0) / poolCount
+  
+        const avgChangeH1 = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.price_change_percentage.h1 || '0'), 0) / poolCount
+  
+        const avgChangeH6 = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.price_change_percentage.h6 || '0'), 0) / poolCount
+  
+        const avgChangeH24 = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.price_change_percentage.h24 || '0'), 0) / poolCount
+  
+        // Get market cap - use the highest volume pool or calculate average
+        let totalMarketCap = 0;
+
+        if (pools.length === 1) {
+          // If only one pool, just use its market cap
+          totalMarketCap = pools[0].attributes.market_cap_usd 
+            ? parseFloat(pools[0].attributes.market_cap_usd) 
+            : parseFloat(pools[0].attributes.fdv_usd || '0');
+        } else {
+          // Find the pool with the highest 24h volume
+          const highestVolumePool = pools.reduce((prev, current) => {
+            const prevVolume = parseFloat(prev.attributes.volume_usd.h24 || '0');
+            const currentVolume = parseFloat(current.attributes.volume_usd.h24 || '0');
+            return currentVolume > prevVolume ? current : prev;
+          }, pools[0]);
+  
+          // Use market cap from highest volume pool
+          totalMarketCap = highestVolumePool.attributes.market_cap_usd 
+            ? parseFloat(highestVolumePool.attributes.market_cap_usd) 
+            : parseFloat(highestVolumePool.attributes.fdv_usd || '0');
+        }
+
+        // Get the total FDV (fully diluted valuation) if available
+        const totalFdvUsd = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.fdv_usd || '0'), 0)
+
+        // Sum volumes for each timeframe
+        const totalVolumeM5 = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.volume_usd.m5 || '0'), 0)
+  
+        const totalVolumeH1 = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.volume_usd.h1 || '0'), 0)
+  
+        const totalVolumeH6 = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.volume_usd.h6 || '0'), 0)
+  
+        const totalVolumeH24 = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.volume_usd.h24 || '0'), 0)
+
+        // Sum transactions for each timeframe
+        const txM5 = {
+          buys: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.m5?.buys || 0), 0),
+          sells: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.m5?.sells || 0), 0),
+          buyers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.m5?.buyers || 0), 0),
+          sellers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.m5?.sellers || 0), 0)
+        }
+
+        const txH1 = {
+          buys: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h1?.buys || 0), 0),
+          sells: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h1?.sells || 0), 0),
+          buyers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h1?.buyers || 0), 0),
+          sellers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h1?.sellers || 0), 0)
+        }
+
+        const txH6 = {
+          buys: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h6?.buys || 0), 0),
+          sells: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h6?.sells || 0), 0),
+          buyers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h6?.buyers || 0), 0),
+          sellers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h6?.sellers || 0), 0)
+        }
+
+        const txH24 = {
+          buys: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h24?.buys || 0), 0),
+          sells: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h24?.sells || 0), 0),
+          buyers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h24?.buyers || 0), 0),
+          sellers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h24?.sellers || 0), 0)
+        }
+
+        // Calculate total reserve across all pools
+        const totalReserve = pools.reduce((sum, pool) => 
+          sum + parseFloat(pool.attributes.reserve_in_usd || '0'), 0)
+
+        // Use the first pool's base token ID
+        const baseId = pools[0].id;
+        const baseTokenId = pools[0].relationships.base_token.data.id;
+
+        const cleanTokenId = baseTokenId.startsWith('ronin_') ? baseTokenId.substring(6) : baseTokenId;
+
+        // Get existing token data if available to preserve its image
+        const existingToken = cryptoData.find(t => t.symbol === symbol);
+
+        // Initially use the fallback image OR existing image if available
+        return {
+          id: cleanTokenId,
+          name: symbol,
+          symbol: symbol,
+          current_price: avgPrice,
+          price_change_percentage_m5: avgChangeM5,
+          price_change_percentage_h1: avgChangeH1,
+          price_change_percentage_h6: avgChangeH6,
+          price_change_percentage_h24: avgChangeH24,
+          market_cap: totalMarketCap,
+          fdv_usd: totalFdvUsd,
+          volume_m5: totalVolumeM5,
+          volume_h1: totalVolumeH1,
+          volume_h6: totalVolumeH6,
+          volume_h24: totalVolumeH24,
+          total_volume: totalVolumeH24,
+          transactions_m5: txM5,
+          transactions_h1: txH1,
+          transactions_h6: txH6,
+          transactions_h24: txH24,
+          reserve_in_usd: totalReserve,
+          image: existingToken?.image || '/token_logo.png', // Preserve image if token exists
+          baseTokenId: baseTokenId,
+          pair_name: poolCount > 1 ? `${symbol} (${poolCount} pools)` : pools[0].attributes.name,
+          pool_count: poolCount
+        };
+      });
+
+      // Update state in a way that preserves bubble positions for unchanged tokens
+      setCryptoData(prevData => {
+        // Merge new data with existing data
+        return transformedData.map(newToken => {
+          const existingToken = prevData.find(t => t.symbol === newToken.symbol);
+          
+          // If token exists and has the same price/volume, preserve it exactly
+          // This helps keep bubble positions stable for unchanged tokens
+          if (existingToken && 
+              existingToken.current_price === newToken.current_price &&
+              existingToken.volume_h24 === newToken.volume_h24) {
+            return existingToken;
           }
-        })
-
-        console.log(`Fetched ${allPoolsData.length} pools from ${pagesData.length} pages`)
-
-        // Group pools by base token symbol
-        const tokenMap = new Map<string, GeckoPoolData[]>()
-
-        allPoolsData.forEach(pool => {
-          // Extract base token symbol from pool name
-          const nameParts = pool.attributes.name.split(' / ')
-          const baseSymbol = nameParts[0]
-  
-          if (!tokenMap.has(baseSymbol)) {
-            tokenMap.set(baseSymbol, [])
-          }
-  
-          tokenMap.get(baseSymbol)!.push(pool)
-        })
-
-        // Calculate average metrics for each unique token
-        const transformedData = Array.from(tokenMap.entries()).map(([symbol, pools]) => {
-          const poolCount = pools.length;
-  
-          // Calculate average values across all pools
-          const avgPrice = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.base_token_price_usd || '0'), 0) / poolCount
-    
-          const avgChangeM5 = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.price_change_percentage.m5 || '0'), 0) / poolCount
-    
-          const avgChangeH1 = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.price_change_percentage.h1 || '0'), 0) / poolCount
-    
-          const avgChangeH6 = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.price_change_percentage.h6 || '0'), 0) / poolCount
-    
-          const avgChangeH24 = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.price_change_percentage.h24 || '0'), 0) / poolCount
-    
-          // Get market cap - use the highest volume pool or calculate average
-          let totalMarketCap = 0;
-
-          if (pools.length === 1) {
-            // If only one pool, just use its market cap
-            totalMarketCap = pools[0].attributes.market_cap_usd 
-              ? parseFloat(pools[0].attributes.market_cap_usd) 
-              : parseFloat(pools[0].attributes.fdv_usd || '0');
-          } else {
-            // Find the pool with the highest 24h volume
-            const highestVolumePool = pools.reduce((prev, current) => {
-              const prevVolume = parseFloat(prev.attributes.volume_usd.h24 || '0');
-              const currentVolume = parseFloat(current.attributes.volume_usd.h24 || '0');
-              return currentVolume > prevVolume ? current : prev;
-            }, pools[0]);
-    
-            // Use market cap from highest volume pool
-            totalMarketCap = highestVolumePool.attributes.market_cap_usd 
-              ? parseFloat(highestVolumePool.attributes.market_cap_usd) 
-              : parseFloat(highestVolumePool.attributes.fdv_usd || '0');
-          }
-  
-          // Get the total FDV (fully diluted valuation) if available
-          const totalFdvUsd = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.fdv_usd || '0'), 0)
-  
-          // Sum volumes for each timeframe
-          const totalVolumeM5 = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.volume_usd.m5 || '0'), 0)
-    
-          const totalVolumeH1 = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.volume_usd.h1 || '0'), 0)
-    
-          const totalVolumeH6 = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.volume_usd.h6 || '0'), 0)
-    
-          const totalVolumeH24 = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.volume_usd.h24 || '0'), 0)
-  
-          // Sum transactions for each timeframe
-          const txM5 = {
-            buys: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.m5?.buys || 0), 0),
-            sells: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.m5?.sells || 0), 0),
-            buyers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.m5?.buyers || 0), 0),
-            sellers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.m5?.sellers || 0), 0)
-          }
-  
-          const txH1 = {
-            buys: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h1?.buys || 0), 0),
-            sells: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h1?.sells || 0), 0),
-            buyers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h1?.buyers || 0), 0),
-            sellers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h1?.sellers || 0), 0)
-          }
-  
-          const txH24 = {
-            buys: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h24?.buys || 0), 0),
-            sells: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h24?.sells || 0), 0),
-            buyers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h24?.buyers || 0), 0),
-            sellers: pools.reduce((sum, pool) => sum + (pool.attributes.transactions?.h24?.sellers || 0), 0)
-          }
-  
-          // Calculate total reserve across all pools
-          const totalReserve = pools.reduce((sum, pool) => 
-            sum + parseFloat(pool.attributes.reserve_in_usd || '0'), 0)
-  
-          // Use the first pool's base token ID
-          const baseId = pools[0].id;
-          const baseTokenId = pools[0].relationships.base_token.data.id;
-
-          const cleanTokenId = baseTokenId.startsWith('ronin_') ? baseTokenId.substring(6) : baseTokenId;
-  
-          // Initially use the fallback image for all tokens
+          
+          // For changed tokens or new tokens, use the new data
+          // but preserve any custom image that was already loaded
           return {
-            id: cleanTokenId,
-            name: symbol,
-            symbol: symbol,
-            current_price: avgPrice,
-            price_change_percentage_m5: avgChangeM5,
-            price_change_percentage_h1: avgChangeH1,
-            price_change_percentage_h6: avgChangeH6,
-            price_change_percentage_h24: avgChangeH24,
-            market_cap: totalMarketCap,
-            fdv_usd: totalFdvUsd,
-            volume_m5: totalVolumeM5,
-            volume_h1: totalVolumeH1,
-            volume_h6: totalVolumeH6,
-            volume_h24: totalVolumeH24,
-            total_volume: totalVolumeH24,
-            transactions_m5: txM5,
-            transactions_h1: txH1,
-            transactions_h24: txH24,
-            reserve_in_usd: totalReserve,
-            image: '/token_logo.png',
-            baseTokenId: baseTokenId,
-            pair_name: poolCount > 1 ? `${symbol} (${poolCount} pools)` : pools[0].attributes.name,
-            pool_count: poolCount
+            ...newToken,
+            image: (existingToken && existingToken.image !== '/token_logo.png') 
+            ? existingToken?.image 
+              : newToken.image
           };
         });
+      });
 
-        // Set initial state with fallback images
-        setCryptoData(transformedData);
-        setFilteredData(transformedData);
-
-        // In your useEffect where you load images:
-        transformedData.forEach(token => {
-          if (token.baseTokenId) {
-            const tokenAddress = token.baseTokenId.split('_')[1];
-            
-            // Queue image loading with callback to update state when image is ready
+      // Only try to load images for tokens that still have fallback images
+      transformedData.forEach(token => {
+        if (token.baseTokenId) {
+          const tokenAddress = token.baseTokenId.split('_')[1];
+          
+          // First check if this token already has a custom image
+          const existingToken = cryptoData.find(t => t.id === token.id);
+          const hasCustomImage = existingToken && existingToken.image !== '/token_logo.png';
+          
+          // Only attempt to load images for tokens still using fallback image
+          if (!hasCustomImage) {
             tokenImageService.getTokenImageUrl(tokenAddress, (imageUrl) => {
-              if (imageUrl !== '/token_logo.png') { // Only update if we got a real image
-                setCryptoData(prevData => {
-                  // Check if the image has actually changed to prevent unnecessary re-renders
-                  const tokenIndex = prevData.findIndex((t: CryptoData) => t.id === token.id);
-                  if (tokenIndex >= 0 && prevData[tokenIndex].image !== imageUrl) {
-                    const newData = [...prevData];
-                    newData[tokenIndex] = {...newData[tokenIndex], image: imageUrl};
-                    return newData;
-                  }
-                  return prevData;
-                });
-              }
+              setCryptoData(prevData => {
+                const tokenIndex = prevData.findIndex((t: CryptoData) => t.id === token.id);
+                // Only update if we found the token and the image would change
+                if (tokenIndex >= 0 && prevData[tokenIndex].image !== imageUrl) {
+                  const newData = [...prevData];
+                  newData[tokenIndex] = {...newData[tokenIndex], image: imageUrl};
+                  return newData;
+                }
+                return prevData;
+              });
             });
           }
-        });
+        }
+      });
 
-      } catch (error) {
-        console.error("Error fetching crypto data:", error)
-        // For demo, use mock data if API fails
+    } catch (error) {
+      console.error("Error fetching crypto data:", error)
+      // For demo, use mock data if API fails and no data exists
+      if (cryptoData.length === 0) {
         const mockData = generateMockData()
         setCryptoData(mockData)
-        setFilteredData(mockData)
-      } finally {
-        setLoading(false)
       }
+    } finally {
+      setLoading(false)
     }
+    
+    // Return a promise that resolves when done
+    return Promise.resolve();
+  };
 
-    fetchData()
-  }, [])
-  // Filter data based on search query
+  // Fetch crypto data only on initial mount
   useEffect(() => {
-    if (searchQuery.trim() === "") {
-      setFilteredData(cryptoData)
-    } else {
-      const filtered = cryptoData.filter(
+    fetchData();
+  }, []);
+  
+  // Setup refresh timer
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeRemaining(prev => {
+        if (prev <= 1) {
+          // Time to refresh data
+          setRefreshing(true);
+          fetchData().finally(() => {
+            setRefreshing(false);
+            return 30; // Reset timer
+          });
+          return 30;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    return () => clearInterval(timer);
+  }, []);
+  // Apply filters without triggering data refresh
+  useEffect(() => {
+    if (cryptoData.length === 0) return;
+    
+    // Filter by price direction (up only/down only)
+    let filtered = [...cryptoData];
+    
+    // Apply direction filters
+    if (showUpOnly) {
+      filtered = filtered.filter(crypto => getPriceChangeForTimeframe(crypto) > 0);
+    } else if (showDownOnly) {
+      filtered = filtered.filter(crypto => getPriceChangeForTimeframe(crypto) < 0);
+    }
+    
+    // Apply search filter
+    if (searchQuery.trim() !== "") {
+      filtered = filtered.filter(
         (crypto) =>
           crypto.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           crypto.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
           crypto.pair_name.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-      setFilteredData(filtered)
+      );
     }
-  }, [searchQuery, cryptoData])
+    
+    // Apply token limit - first sort by volume
+    filtered.sort((a, b) => getVolumeForTimeframe(b) - getVolumeForTimeframe(a));
+    // Then limit the number of tokens
+    filtered = filtered.slice(0, tokenLimit);
+    
+    setFilteredData(filtered);
+    
+    // This effect depends on filter states but NOT on cryptoData to avoid refresh
+  }, [timeframe, showUpOnly, showDownOnly, tokenLimit, searchQuery, cryptoData]);
+
+  // Helper function to get price change percentage based on timeframe
+  const getPriceChangeForTimeframe = (crypto: CryptoData) => {
+    switch(timeframe) {
+      case "m5": return crypto.price_change_percentage_m5;
+      case "h1": return crypto.price_change_percentage_h1;
+      case "h6": return crypto.price_change_percentage_h6;
+      case "h24": return crypto.price_change_percentage_h24;
+      default: return crypto.price_change_percentage_h24;
+    }
+  }
+
+  // Helper function to get volume based on timeframe
+  const getVolumeForTimeframe = (crypto: CryptoData) => {
+    switch(timeframe) {
+      case "m5": return crypto.volume_m5;
+      case "h1": return crypto.volume_h1;
+      case "h6": return crypto.volume_h6;
+      case "h24": return crypto.volume_h24;
+      default: return crypto.volume_h24;
+    }
+  }
+
+  // Helper function to get transactions data based on timeframe
+  const getTransactionsForTimeframe = (crypto: CryptoData) => {
+    switch(timeframe) {
+      case "m5": return crypto.transactions_m5;
+      case "h1": return crypto.transactions_h1;
+      case "h6": return crypto.transactions_h6;
+      case "h24": return crypto.transactions_h24;
+      default: return crypto.transactions_h24;
+    }
+  }
+
+  // Format timeframe for display
+  const formatTimeframe = (timeframe: string): string => {
+    switch(timeframe) {
+      case "m5": return "5m";
+      case "h1": return "1h";
+      case "h6": return "6h";
+      case "h24": return "24h";
+      default: return "24h";
+    }
+  }
+
+  // Share to Twitter function
+  const shareToTwitter = (crypto: CryptoData) => {
+    const priceChange = getPriceChangeForTimeframe(crypto);
+    const formattedChange = priceChange >= 0 ? `+${priceChange.toFixed(2)}%` : `${priceChange.toFixed(2)}%`;
+    const timeframeDisplay = formatTimeframe(timeframe);
+    
+    // Select emoji based on price direction
+    const emoji = priceChange >= 0 ? '🚀' : '📉';
+    
+    // Create the tweet text with conditionally selected emoji
+    const tweetText = `${crypto.symbol} is ${priceChange >= 0 ? 'up' : 'down'} ${formattedChange} in the last ${timeframeDisplay} on @Ronin_Network! ${emoji}\n\nCheck out Ronin Bubbles by @Masamune_CTO to track token performance in real-time 🔥\n\n`.trim();
+    
+    // URL to share (your website)
+    const shareUrl = window.location.href;
+    
+    // Construct the Twitter intent URL without hashtags
+    const twitterUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(tweetText)}&url=${encodeURIComponent(shareUrl)}`;
+    
+    // Open Twitter intent in a new window
+    window.open(twitterUrl, '_blank');
+  };
 
   // Handle bubble click
   const handleBubbleClick = (crypto: CryptoData) => {
@@ -441,159 +597,221 @@ export default function CryptoBubbles() {
       }
     })
   }
-  // Helper function to get price change percentage based on timeframe
-  const getPriceChangeForTimeframe = (crypto: CryptoData) => {
-    switch(timeframe) {
-      case "m5": return crypto.price_change_percentage_m5;
-      case "h1": return crypto.price_change_percentage_h1;
-      case "h6": return crypto.price_change_percentage_h6;
-      case "h24": return crypto.price_change_percentage_h24;
-      default: return crypto.price_change_percentage_h24;
-    }
-  }
-
-  // Helper function to get volume based on timeframe
-  const getVolumeForTimeframe = (crypto: CryptoData) => {
-    switch(timeframe) {
-      case "m5": return crypto.volume_m5;
-      case "h1": return crypto.volume_h1;
-      case "h6": return crypto.volume_h6;
-      case "h24": return crypto.volume_h24;
-      default: return crypto.volume_h24;
-    }
-  }
-
-  // Helper function to get transactions data based on timeframe
-  const getTransactionsForTimeframe = (crypto: CryptoData) => {
-    switch(timeframe) {
-      case "m5": return crypto.transactions_m5;
-      case "h1": return crypto.transactions_h1;
-      case "h6": return crypto.transactions_h6;
-      case "h24": return crypto.transactions_h24;
-      default: return crypto.transactions_h24;
-    }
-  }
-
-  // Add this formatter function before the return statement
-  const formatTimeframe = (timeframe: string): string => {
-    switch(timeframe) {
-      case "m5": return "5m";
-      case "h1": return "1h";
-      case "h6": return "6h";
-      case "h24": return "24h";
-      default: return "24h";
-    }
-  }
-
-  // Add this function before the return statement
-  const shareToTwitter = (crypto: CryptoData) => {
-    const priceChange = getPriceChangeForTimeframe(crypto);
-    const formattedChange = priceChange >= 0 ? `+${priceChange.toFixed(2)}%` : `${priceChange.toFixed(2)}%`;
-    const timeframeDisplay = formatTimeframe(timeframe);
-    
-    // Select emoji based on price direction
-    const emoji = priceChange >= 0 ? '🚀' : '📉';
-    
-    // Create the tweet text with conditionally selected emoji
-    const tweetText = `$${crypto.symbol} is ${priceChange >= 0 ? 'up' : 'down'} ${formattedChange} in the last ${timeframeDisplay} on @Ronin_Network! ${emoji}\n\nCheck out Ronin Bubbles by @Masamune_CTO to track token performance in real-time 🔥\n\n`.trim();
-    
-    // URL to share (your website)
-    const shareUrl = window.location.href;
-    
-    // Construct the Twitter intent URL without hashtags
-    const twitterUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(tweetText)}&url=${encodeURIComponent(shareUrl)}`;
-    
-    // Open Twitter intent in a new window
-    window.open(twitterUrl, '_blank');
-  };
-
   return (
     <div className="w-full pt-0 -mt-2">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
-        <Tabs
-          defaultValue="h24"
-          className="w-full md:w-auto"
-          onValueChange={(value) => setTimeframe(value as "m5" | "h1" | "h6" | "h24")}
-        >
-          <TabsList className="bg-blue-900/50">
-            <TabsTrigger value="m5" className="data-[state=active]:bg-blue-700 text-blue-100">
-              5m
-            </TabsTrigger>
-            <TabsTrigger value="h1" className="data-[state=active]:bg-blue-700 text-blue-100">
-              1h
-            </TabsTrigger>
-            <TabsTrigger value="h6" className="data-[state=active]:bg-blue-700 text-blue-100">
-              6h
-            </TabsTrigger>
-            <TabsTrigger value="h24" className="data-[state=active]:bg-blue-700 text-blue-100">
-              24h
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-
-        <div className="hidden md:flex items-center justify-center gap-3">
-          <h1 className="text-xl md:text-2xl font-bold text-blue-100">
-            Ronin Bubbles by {" "}
-            <a 
-              href="https://x.com/masamune_CTO" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-blue-300 hover:text-blue-200 transition-colors"
-            >
-              Masamune.meme
-            </a>
-          </h1>
-          <img 
-            src="/masa_sword.png" 
-            alt="Masamune Bubbles Logo" 
-            className="w-12 h-12" 
-          />
-        </div>
-
-        <div className="relative w-full md:w-64">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-blue-300" />
-          <Input
-            placeholder="Search tokens..."
-            className="pl-8 pr-8 bg-blue-900/30 border-blue-700 text-blue-100 placeholder:text-blue-400"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          {searchQuery && (
-            <button className="absolute right-2 top-2.5" onClick={() => setSearchQuery("")}>
-              <X className="h-4 w-4 text-blue-300" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="flex items-center justify-center gap-2 mb-4 md:hidden">
-        <h1 className="text-xl font-bold text-blue-100">
-          Ronin Bubbles by {" "}
-            <a 
-              href="https://x.com/masamune_CTO" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-blue-300 hover:text-blue-200 transition-colors"
-            >
-              Masamune.meme
-            </a>
-        </h1>
-        <img 
-          src="/masa_sword.png" 
-          alt="Masamune Bubbles Logo" 
-          className="w-10 h-10" 
-        />
-      </div>
-
       <Card className="w-full bg-[#0f2447] border-blue-800 text-blue-100">
-        <CardHeader>
-        <CardTitle>Ronin Tokens Performance ({formatTimeframe(timeframe)})</CardTitle>
-          <CardDescription className="text-blue-300">
-            Bubble size represents the magnitude of price change. Click empty space to repel bubbles. Click on a bubble
-            for details.
+        <CardHeader className="pb-2 pt-3"> {/* Reduced padding */}
+          {/* Top row with branding on left and search on right */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-1"> {/* Reduced gap and margin */}
+            {/* Left side - Ronin Bubbles branding */}
+            <div className="flex items-center gap-2"> {/* Reduced gap */}
+              <h1 className="text-xl md:text-2xl font-bold text-blue-100">
+                Ronin Bubbles by{" "}
+                <a 
+                  href="https://x.com/masamune_CTO" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-blue-300 hover:text-blue-200 transition-colors"
+                >
+                  Masamune.meme
+                </a>
+              </h1>
+              <img 
+                src="/masa_sword.png" 
+                alt="Masamune Bubbles Logo" 
+                className="w-9 h-9 md:w-10 md:h-10" 
+              />
+            </div>
+            
+            {/* Right side - Search bar (smaller on desktop) */}
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-blue-300" />
+              <Input
+                placeholder="Search tokens..."
+                className="pl-8 pr-8 bg-blue-900/30 border-blue-700 text-blue-100 placeholder:text-blue-400"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button className="absolute right-2 top-2.5" onClick={() => setSearchQuery("")}>
+                  <X className="h-4 w-4 text-blue-300" />
+                </button>
+              )}
+            </div>
+          </div>
+          {/* Second row with description on left and filters on right */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3"> {/* Increased bottom margin */}
+            {/* Left side - Performance text (only visible on larger screens) */}
+            <div className="hidden sm:block max-w-[60%] text-blue-300 text-sm">
+              <span className="font-semibold">Ronin Tokens Performance ({formatTimeframe(timeframe)})</span>. Bubble size represents the magnitude of price change. Click empty space to repel bubbles. Click on a bubble for details.
+            </div>
+            
+            {/* Right side - Desktop filters */}
+            <div className="hidden sm:flex flex-row gap-1">
+              <Tabs
+                value={timeframe}
+                className="w-auto"
+                onValueChange={(value) => setTimeframe(value as "m5" | "h1" | "h6" | "h24")}
+              >
+                <TabsList className="bg-blue-900/50">
+                  <TabsTrigger value="m5" className="data-[state=active]:bg-blue-700 text-blue-100">5m</TabsTrigger>
+                  <TabsTrigger value="h1" className="data-[state=active]:bg-blue-700 text-blue-100">1h</TabsTrigger>
+                  <TabsTrigger value="h6" className="data-[state=active]:bg-blue-700 text-blue-100">6h</TabsTrigger>
+                  <TabsTrigger value="h24" className="data-[state=active]:bg-blue-700 text-blue-100">24h</TabsTrigger>
+                </TabsList>
+              </Tabs>
+              
+              <div className="flex bg-blue-900/50 rounded-md p-0.5">
+                <button
+                  onClick={() => {
+                    setShowUpOnly(!showUpOnly);
+                    if (!showUpOnly && showDownOnly) setShowDownOnly(false);
+                  }}
+                  className={`px-3 py-1 rounded-sm text-sm transition-colors ${
+                    showUpOnly ? 'bg-blue-700 text-blue-100' : 'text-blue-300 hover:text-blue-100'
+                  }`}
+                >
+                  Up only 🟢
+                </button>
+                <button
+                  onClick={() => {
+                    setShowDownOnly(!showDownOnly);
+                    if (!showDownOnly && showUpOnly) setShowUpOnly(false);
+                  }}
+                  className={`px-3 py-1 rounded-sm text-sm ml-1 transition-colors ${
+                    showDownOnly ? 'bg-blue-700 text-blue-100' : 'text-blue-300 hover:text-blue-100'
+                  }`}
+                >
+                  Down only 🔴
+                </button>
+              </div>
+              
+              <Tabs
+                value={tokenLimit.toString()}
+                className="w-auto"
+                onValueChange={(value) => {
+                  setTokenLimit(parseInt(value) as 10 | 25 | 50 | 100);
+                }}
+              >
+                <TabsList className="bg-blue-900/50">
+                  <TabsTrigger value="10" className="data-[state=active]:bg-blue-700 text-blue-100">Top 10</TabsTrigger>
+                  <TabsTrigger value="25" className="data-[state=active]:bg-blue-700 text-blue-100">Top 25</TabsTrigger>
+                  <TabsTrigger value="50" className="data-[state=active]:bg-blue-700 text-blue-100">Top 50</TabsTrigger>
+                  <TabsTrigger value="100" className="data-[state=active]:bg-blue-700 text-blue-100">Top 100</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+          </div>
+          
+          {/* Mobile filters - only visible on small screens */}
+          <div className="sm:hidden w-full mb-1">
+            <button
+              onClick={() => setIsFilterMenuOpen(!isFilterMenuOpen)}
+              className="w-full flex items-center justify-between px-3 py-1 bg-blue-800/60 rounded-md text-blue-100 hover:bg-blue-700/70 transition-colors" 
+            >
+              <span>Filters</span>
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="16" 
+                height="16" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                className={`transition-transform ${isFilterMenuOpen ? 'rotate-180' : ''}`}
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            
+            {/* Collapsible filter menu for small screens with animations */}
+            {isFilterMenuOpen && (
+              <div className="mt-1 p-2 bg-blue-900/70 rounded-md border border-blue-800/50 shadow-lg"> {/* Reduced margin and padding */}
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <p className="text-xs text-blue-300 mb-1">Time Period</p>
+                    <Tabs
+                      value={timeframe}
+                      className="w-full"
+                      onValueChange={(value) => setTimeframe(value as "m5" | "h1" | "h6" | "h24")}
+                    >
+                      <TabsList className="bg-blue-900/50 w-full">
+                        <TabsTrigger value="m5" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">5m</TabsTrigger>
+                        <TabsTrigger value="h1" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">1h</TabsTrigger>
+                        <TabsTrigger value="h6" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">6h</TabsTrigger>
+                        <TabsTrigger value="h24" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">24h</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                  
+                  <div>
+                    <p className="text-xs text-blue-300 mb-1">Direction</p>
+                    <div className="flex bg-blue-900/50 rounded-md p-0.5 w-full">
+                      <button
+                        onClick={() => {
+                          setShowUpOnly(!showUpOnly);
+                          if (!showUpOnly && showDownOnly) setShowDownOnly(false);
+                        }}
+                        className={`flex-1 px-3 py-1 rounded-sm text-sm transition-colors ${
+                          showUpOnly ? 'bg-blue-700 text-blue-100' : 'text-blue-300 hover:text-blue-100'
+                        }`}
+                      >
+                        Up only 🟢
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowDownOnly(!showDownOnly);
+                          if (!showDownOnly && showUpOnly) setShowUpOnly(false);
+                        }}
+                        className={`flex-1 px-3 py-1 rounded-sm text-sm ml-1 transition-colors ${
+                          showDownOnly ? 'bg-blue-700 text-blue-100' : 'text-blue-300 hover:text-blue-100'
+                        }`}
+                      >
+                        Down only 🔴
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <p className="text-xs text-blue-300 mb-1">Token Count</p>
+                    <Tabs
+                      value={tokenLimit.toString()}
+                      className="w-full"
+                      onValueChange={(value) => {
+                        setTokenLimit(parseInt(value) as 10 | 25 | 50 | 100);
+                      }}
+                    >
+                      <TabsList className="bg-blue-900/50 w-full">
+                        <TabsTrigger value="10" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">10</TabsTrigger>
+                        <TabsTrigger value="25" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">25</TabsTrigger>
+                        <TabsTrigger value="50" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">50</TabsTrigger>
+                        <TabsTrigger value="100" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">100</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Mobile description - only visible on small screens */}
+          <CardDescription className="sm:hidden text-blue-300 mt-1 mb-3 text-sm"> {/* Added bottom margin */}
+            <span className="font-semibold">Ronin Tokens Performance ({formatTimeframe(timeframe)})</span>. Bubble size represents the magnitude of price change. Click empty space to repel bubbles. Click on a bubble for details.
           </CardDescription>
+
+          {/* Refresh timer - just the progress bar */}
+          <div className="text-blue-300 mt-0">
+            <div className="w-full bg-blue-900/30 h-1 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-blue-400 transition-all duration-1000 ease-linear"
+                style={{ width: `${(timeRemaining / 30) * 100}%` }}
+              />
+            </div>
+          </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-1"> {/* Reduced top padding */}
           <div ref={containerRef} className="w-full h-[80vh] relative bg-[#061325] rounded-md">
             {loading ? (
               <div className="flex flex-wrap justify-center gap-4 h-full items-center">

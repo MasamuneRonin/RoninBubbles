@@ -76,3 +76,41 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Filter menu animations */
+.filter-menu-enter {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 300ms ease, opacity 200ms ease;
+}
+
+.filter-menu-enter-active {
+  max-height: 500px;
+  opacity: 1;
+}
+
+.filter-menu-exit {
+  max-height: 500px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 300ms ease, opacity 100ms ease;
+}
+
+.filter-menu-exit-active {
+  max-height: 0;
+  opacity: 0;
+}
+
+/* Smoother filter menu toggle */
+.filter-menu {
+  overflow: hidden;
+  transition: max-height 0.3s ease-in-out, opacity 0.2s ease-in-out;
+  max-height: 0;
+  opacity: 0;
+}
+
+.filter-menu.open {
+  max-height: 600px;
+  opacity: 1;
+}

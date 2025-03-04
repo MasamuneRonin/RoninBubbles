@@ -104,23 +104,6 @@ export default function CryptoBubblePhysics({
   // Calculate bubble size based on percentage change and data distribution
   const getBubbleSize = useCallback(
     (percentChange: number, cryptoData: CryptoData[]) => {
-      const absChange = Math.abs(percentChange)
-
-      // Analyze the distribution of percentage changes
-      const percentChanges = cryptoData.map((crypto) => Math.abs(getPercentageChange(crypto)))
-      const sortedChanges = [...percentChanges].sort((a, b) => a - b)
-      const maxChange = Math.max(...percentChanges)
-      const minChange = Math.min(...percentChanges)
-      const avgChange = percentChanges.reduce((sum, val) => sum + val, 0) / percentChanges.length
-      
-      // Get the range of the data to determine if values are close together
-      const dataRange = maxChange - minChange
-      
-      // Calculate standard deviation to measure how spread out the values are
-      const variance =
-        percentChanges.reduce((sum, val) => sum + Math.pow(val - avgChange, 2), 0) / percentChanges.length
-      const stdDev = Math.sqrt(variance)
-      
       // Get the canvas dimensions for responsive sizing
       const canvas = canvasRef.current
       if (!canvas) return 40
@@ -133,56 +116,25 @@ export default function CryptoBubblePhysics({
       const minSize = 30 * scaleFactor
       const maxSize = 70 * scaleFactor
       
-      // Instead of using a binary outlier determination, we'll check if the data shows distinct groups
-      // by looking at the gaps between sorted values
+      // Calculate the absolute percentage change (we care about magnitude, not direction)
+      const absChange = Math.abs(percentChange)
       
-      // Find the largest gap in the data (ignoring the smallest 10% to avoid sensitivity to small changes)
-      const startIndex = Math.max(1, Math.floor(sortedChanges.length * 0.1))
-      let maxGap = 0
-      let gapThreshold = 0
+      // Cap the percentage change at 100% for sizing purposes
+      const cappedPercentChange = Math.min(absChange, 100)
       
-      for (let i = startIndex; i < sortedChanges.length; i++) {
-        const gap = sortedChanges[i] - sortedChanges[i-1]
-        if (gap > maxGap) {
-          maxGap = gap
-        }
-      }
+      // Linear scaling between 0% (minimum size) and 100% (maximum size)
+      const sizeRatio = cappedPercentChange / 100
       
-      // Determine if we have significant gaps in the data (suggesting outliers)
-      // Only consider something an outlier if the gap is significant relative to the data range
-      const hasSignificantGaps = maxGap > dataRange * 0.2
+      // Calculate the bubble size with a slight non-linear scaling to make smaller changes more visible
+      // Using a mix of linear and square root to create a slight curve
+      const normalizedSize = Math.sqrt(sizeRatio) * 0.7 + sizeRatio * 0.3
       
-      // If the data range is very small (values are close together), don't consider any outliers
-      const valuesAreClose = dataRange < avgChange * 0.5 || stdDev < avgChange * 0.3
+      // Calculate final size between min and max
+      const size = minSize + normalizedSize * (maxSize - minSize)
       
-      // Determine the degree of "outlier-ness" - how far above the "normal" values this point is
-      let outlierFactor = 0
-      
-      if (hasSignificantGaps && !valuesAreClose) {
-        // Find the gap threshold - the point where values start to separate significantly
-        gapThreshold = sortedChanges[sortedChanges.length - 1] - maxGap
-        
-        // If this value is above the gap threshold, calculate how much of an outlier it is
-        if (absChange > gapThreshold) {
-          // Calculate how far beyond the threshold this value is (0-1 scale)
-          outlierFactor = Math.min(1, (absChange - gapThreshold) / maxGap)
-        }
-      }
-      
-      // Base size using a compressed scale for non-outliers
-      const normalizedChange = absChange / maxChange
-      const compressedScale = Math.sqrt(normalizedChange) * 0.7 + normalizedChange * 0.3
-      let size = minSize + compressedScale * (maxSize - minSize) * 0.8
-      
-      // Apply outlier scaling if applicable
-      if (outlierFactor > 0) {
-        // Scale up based on how much of an outlier this is
-        const outlierBoost = outlierFactor * (maxSize * 0.6)
-        size += outlierBoost
-      }
-      return Math.max(minSize, Math.min(maxSize * 1.5, size))
+      return size
     },
-    [getPercentageChange],
+    [/* dependencies removed for brevity */],
   )  
 
   useEffect(() => {
@@ -192,7 +144,7 @@ export default function CryptoBubblePhysics({
       const hasImageChanged = currentCachedImage?.src !== crypto.image;
       
       if (!currentCachedImage || hasImageChanged) {
-        console.log(`Loading new image for ${crypto.symbol}: ${crypto.image}`);
+        // console.log(`Loading new image for ${crypto.symbol}: ${crypto.image}`);
         
         // Create a new image
         const img = new Image();
@@ -200,7 +152,7 @@ export default function CryptoBubblePhysics({
         
         // Set up error handling
         img.onerror = () => {
-          console.error(`Failed to load image for ${crypto.symbol}`);
+          // console.error(`Failed to load image for ${crypto.symbol}`);
           const fallbackImg = new Image();
           fallbackImg.src = '/token_logo.png';
           imageCache.current.set(crypto.id, fallbackImg);
@@ -208,7 +160,7 @@ export default function CryptoBubblePhysics({
         
         // Important: Set onload handler BEFORE setting src
         img.onload = () => {
-          console.log(`Image loaded successfully for ${crypto.symbol}`);
+          // console.log(`Image loaded successfully for ${crypto.symbol}`);
           // Only update cache after successful load
           imageCache.current.set(crypto.id, img);
         };
@@ -499,7 +451,7 @@ export default function CryptoBubblePhysics({
               iconSize,
             )
           } catch (error) {
-            console.error(`Failed to draw image for ${bubble.crypto.symbol}:`, error)
+            // console.error(`Failed to draw image for ${bubble.crypto.symbol}:`, error)
             // Don't set to null, just log the error
             // imageCache.current.set(bubble.crypto.id, null)
           }
