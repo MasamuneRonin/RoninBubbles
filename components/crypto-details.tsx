@@ -87,40 +87,51 @@ export default function CryptoDetails({ crypto, timeframe, onClose, shareToTwitt
         onClick={(e) => e.stopPropagation()}
       >
         <Card className="bg-[#0f2447] border-blue-700 text-blue-100">
-          <CardHeader className="relative">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-4 top-4 text-blue-300 hover:text-blue-100 hover:bg-blue-800/50"
-              onClick={onClose}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-            <div className="flex items-center gap-3">
-              <img
-                src={crypto.image || '/token_logo.png'}
-                alt={crypto.name}
-                className="w-10 h-10"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = '/token_logo.png';
-                }}
-              />
-              <div>
-                <CardTitle>{crypto.name}</CardTitle>
-                <CardDescription className="text-blue-300">
-                  CA: {crypto.id}
-                </CardDescription>
+        <CardHeader className="relative">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute right-4 top-4 text-blue-300 hover:text-blue-100 hover:bg-blue-800/50"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+          <div className="flex items-center gap-3">
+            <img
+              src={crypto.image || '/token_logo.png'}
+              alt={crypto.name}
+              className="w-10 h-10"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/token_logo.png';
+              }}
+            />
+            <div className="w-full">
+              <CardTitle>{crypto.name}</CardTitle>
+              <div className="text-blue-300 flex items-center gap-1 mt-1">
+                <span className="font-medium mr-1">CA:</span>
+                <span className="text-sm font-light break-all truncate max-w-[180px] sm:max-w-[300px]">
+                  {crypto.id}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 p-1 ml-1 text-blue-300 hover:text-blue-100 hover:bg-blue-800/50"
+                  onClick={() => {
+                    navigator.clipboard.writeText(crypto.id);
+                    // Optional: Add a toast notification here
+                  }}
+                  title="Copy to clipboard"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </Button>
               </div>
             </div>
-            {/* Remove or comment out the pool count badge */}
-            {/* 
-            {crypto.pool_count && crypto.pool_count > 1 && (
-              <Badge className="mt-2 bg-blue-800/70 text-blue-200">
-                {crypto.pool_count} active pools
-              </Badge>
-            )}
-            */}
-          </CardHeader>
+          </div>
+        </CardHeader>
+
           <CardContent>
             <div className="space-y-4">
             <div className="flex justify-between items-center">

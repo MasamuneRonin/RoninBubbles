@@ -675,9 +675,19 @@ export default function CryptoBubbles() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3"> {/* Increased bottom margin */}
             {/* Left side - Performance text (only visible on larger screens) */}
             <div className="hidden sm:block max-w-[60%] text-blue-300 text-sm">
-              <span className="font-semibold">Ronin Tokens Performance ({formatTimeframe(timeframe)})</span>. Bubble size represents the magnitude of price change. Click empty space to repel bubbles. Click on a bubble for details.
+              <div className="inline-flex items-center group">
+                <span className="font-semibold">Ronin Tokens Performance ({formatTimeframe(timeframe)})</span>
+                <div className="relative inline-block ml-1.5">
+                  <Info className="h-4 w-4 text-blue-300 cursor-help" />
+                  <div className="invisible group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 -translate-y-2 
+                                w-64 p-2 bg-blue-950 text-blue-100 text-xs rounded shadow-lg border border-blue-700
+                                opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-50">
+                    Bubble size represents the magnitude of price change. Click empty space to repel bubbles. Click on a bubble for details.
+                  </div>
+                </div>
+              </div>
             </div>
-            
+
             {/* Right side - Desktop filters */}
             <div className="hidden sm:flex flex-row gap-1">
               <Tabs
