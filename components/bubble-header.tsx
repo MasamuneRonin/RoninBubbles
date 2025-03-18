@@ -90,30 +90,30 @@ export default function BubbleHeader({
         <div className="grid grid-cols-3 items-center gap-3 mb-1">
           {/* Left side - Either branding or token info */}
           {showTokenInfo && tokenName ? (
-            <div className="flex items-center gap-2">
-              {onBackClick && ( // Add back button if onBackClick is provided
+            <div className="flex items-center gap-2 col-span-3 sm:col-span-1">
+              {onBackClick && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="mr-2 text-blue-300 hover:text-blue-100 hover:bg-blue-800/50"
+                  className="mr-1 text-blue-300 hover:text-blue-100 hover:bg-blue-800/50"
                   onClick={onBackClick}
                 >
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
               )}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <img
                   src={tokenImage || '/token_logo.png'}
                   alt={tokenName}
-                  className="w-8 h-8"
+                  className="w-6 h-6 sm:w-8 sm:h-8"
                   onError={(e) => {
                     (e.target as HTMLImageElement).src = '/token_logo.png'
                   }}
                 />
-                <div className="flex items-center">
-                  <h2 className="text-xl font-bold text-white m-0">{tokenName} Trades</h2>
-                  <span className="mx-2 text-blue-300">-</span>
-                  <p className="text-blue-300 m-0">Recent largest trading activity</p>
+                <div className="flex flex-col sm:flex-row sm:items-center">
+                  <h2 className="text-lg sm:text-xl font-bold text-white m-0">{tokenName} Trades</h2>
+                  <span className="hidden sm:inline mx-2 text-blue-300">-</span>
+                  <p className="text-xs sm:text-sm text-blue-300 m-0">Recent largest trading activity</p>
                 </div>
               </div>
             </div>
@@ -134,6 +134,7 @@ export default function BubbleHeader({
               />
             </div>
           )}
+
         {hideBranding && !showTokenInfo && <div></div>} {/* Empty div to maintain grid layout */}
 
           {/* Center - Bubble Switcher (conditionally rendered) */}
