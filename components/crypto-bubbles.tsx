@@ -10,6 +10,8 @@ import CryptoDetails from "@/components/crypto-details"
 import { Skeleton } from "@/components/ui/skeleton"
 import CryptoBubblePhysics from "@/components/crypto-bubble-physics"
 import TokenImageService from "@/lib/image-service";
+import BubbleHeader from "@/components/bubble-header"
+import TradeBubbles from "@/components/trade-bubbles"
 
 // Types for our crypto data
 export interface CryptoData {
@@ -126,10 +128,8 @@ interface GeckoPoolData {
   }
 }
 
-
 // Create an instance with the direct path
 const tokenImageService = new TokenImageService('/token_logo.png');
-
 export default function CryptoBubbles() {
   const [cryptoData, setCryptoData] = useState<CryptoData[]>([])
   const [filteredData, setFilteredData] = useState<CryptoData[]>([])
@@ -145,6 +145,40 @@ export default function CryptoBubbles() {
   const [refreshing, setRefreshing] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Add this for the view switching
+  const [activeView, setActiveView] = useState<"tokens" | "nfts">("tokens")
+  
+  // Add this handler for view changes
+// Update the handleViewChange function to handle all possible view types
+  const handleViewChange = (value: "tokens" | "nfts" | "trades" | "transactions") => {
+    // Only act on tokens/nfts toggles - ignore trades/transactions
+    if (value === "tokens" || value === "nfts") {
+      setActiveView(value);
+      if (value === "nfts") {
+        window.location.href = "/?view=nfts";
+      }
+    }
+  }
+
+
+  // Add this state to the CryptoBubbles component
+  const [viewMode, setViewMode] = useState<"details" | "trades">("details")
+
+  // Update the handleBubbleClick function
+  const handleBubbleClick = (crypto: CryptoData) => {
+    setSelectedCrypto(crypto)
+    setViewMode("details") // Default to details view when clicking a bubble
+  }
+
+  // Add this function to switch to trades view
+  const showTradesView = () => {
+    setViewMode("trades")
+  }
+
+  // Add this function to switch back to details view
+  const showDetailsView = () => {
+    setViewMode("details")
+  }
   // Create a separate fetchData function with improved refresh behavior
   const fetchData = async () => {
     try {
@@ -538,10 +572,11 @@ export default function CryptoBubbles() {
     const emoji = priceChange >= 0 ? '🚀' : '📉';
     
     // Create the tweet text with conditionally selected emoji
-    const tweetText = `${crypto.symbol} is ${priceChange >= 0 ? 'up' : 'down'} ${formattedChange} in the last ${timeframeDisplay} on @Ronin_Network! ${emoji}\n\nCheck out Ronin Bubbles by @Masamune_CTO to track token performance in real-time 🔥\n\n`.trim();
+    const tweetText = `$${crypto.symbol} is ${priceChange >= 0 ? 'up' : 'down'} ${formattedChange} in the last ${timeframeDisplay} on @Ronin_Network! ${emoji}\n`;
     
-    // URL to share (your website)
-    const shareUrl = window.location.href;
+     // URL to share (link to the token's trade page)
+  const tokenIdentifier = crypto.id;
+  const shareUrl = `${window.location.origin}/token/${tokenIdentifier}`;
     
     // Construct the Twitter intent URL without hashtags
     const twitterUrl = `https://x.com/intent/tweet?text=${encodeURIComponent(tweetText)}&url=${encodeURIComponent(shareUrl)}`;
@@ -549,11 +584,6 @@ export default function CryptoBubbles() {
     // Open Twitter intent in a new window
     window.open(twitterUrl, '_blank');
   };
-
-  // Handle bubble click
-  const handleBubbleClick = (crypto: CryptoData) => {
-    setSelectedCrypto(crypto)
-  }
 
   // Close details modal
   const closeDetails = () => {
@@ -632,237 +662,24 @@ export default function CryptoBubbles() {
   return (
     <div className="w-full pt-0 -mt-2">
       <Card className="w-full bg-[#0f2447] border-blue-800 text-blue-100">
-        <CardHeader className="pb-2 pt-3"> {/* Reduced padding */}
-          {/* Top row with branding on left and search on right */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-1"> {/* Reduced gap and margin */}
-            {/* Left side - Ronin Bubbles branding */}
-            <div className="flex items-center gap-2"> {/* Reduced gap */}
-              <h1 className="text-xl md:text-2xl font-bold text-blue-100">
-                Ronin Bubbles by{" "}
-                <a 
-                  href="https://x.com/masamune_CTO" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-blue-300 hover:text-blue-200 transition-colors"
-                >
-                  Masamune.meme
-                </a>
-              </h1>
-              <img 
-                src="/masa_sword.png" 
-                alt="Masamune Bubbles Logo" 
-                className="w-9 h-9 md:w-10 md:h-10" 
-              />
-            </div>
-            
-            {/* Right side - Search bar (smaller on desktop) */}
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-blue-300" />
-              <Input
-                placeholder="Search tokens..."
-                className="pl-8 pr-8 bg-blue-900/30 border-blue-700 text-blue-100 placeholder:text-blue-400"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              {searchQuery && (
-                <button className="absolute right-2 top-2.5" onClick={() => setSearchQuery("")}>
-                  <X className="h-4 w-4 text-blue-300" />
-                </button>
-              )}
-            </div>
-          </div>
-          {/* Second row with description on left and filters on right */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3"> {/* Increased bottom margin */}
-            {/* Left side - Performance text (only visible on larger screens) */}
-            <div className="hidden sm:block max-w-[60%] text-blue-300 text-sm">
-              <div className="inline-flex items-center group">
-                <span className="font-semibold">Ronin Tokens Performance ({formatTimeframe(timeframe)})</span>
-                <div className="relative inline-block ml-1.5">
-                  <Info className="h-4 w-4 text-blue-300 cursor-help" />
-                  <div className="invisible group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 -translate-y-2 
-                                w-64 p-2 bg-blue-950 text-blue-100 text-xs rounded shadow-lg border border-blue-700
-                                opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-50">
-                    Bubble size represents the magnitude of price change. Click empty space to repel bubbles. Click on a bubble for details.
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Right side - Desktop filters */}
-            <div className="hidden sm:flex flex-row gap-1">
-              <Tabs
-                value={timeframe}
-                className="w-auto"
-                onValueChange={(value) => setTimeframe(value as "m5" | "h1" | "h6" | "h24")}
-              >
-                <TabsList className="bg-blue-900/50">
-                  <TabsTrigger value="m5" className="data-[state=active]:bg-blue-700 text-blue-100">5m</TabsTrigger>
-                  <TabsTrigger value="h1" className="data-[state=active]:bg-blue-700 text-blue-100">1h</TabsTrigger>
-                  <TabsTrigger value="h6" className="data-[state=active]:bg-blue-700 text-blue-100">6h</TabsTrigger>
-                  <TabsTrigger value="h24" className="data-[state=active]:bg-blue-700 text-blue-100">24h</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              
-              <div className="flex bg-blue-900/50 rounded-md p-0.5">
-                <button
-                  onClick={() => {
-                    setShowUpOnly(!showUpOnly);
-                    if (!showUpOnly && showDownOnly) setShowDownOnly(false);
-                  }}
-                  className={`px-3 py-1 rounded-sm text-sm transition-colors ${
-                    showUpOnly ? 'bg-blue-700 text-blue-100' : 'text-blue-300 hover:text-blue-100'
-                  }`}
-                >
-                  Up only 🟢
-                </button>
-                <button
-                  onClick={() => {
-                    setShowDownOnly(!showDownOnly);
-                    if (!showDownOnly && showUpOnly) setShowUpOnly(false);
-                  }}
-                  className={`px-3 py-1 rounded-sm text-sm ml-1 transition-colors ${
-                    showDownOnly ? 'bg-blue-700 text-blue-100' : 'text-blue-300 hover:text-blue-100'
-                  }`}
-                >
-                  Down only 🔴
-                </button>
-              </div>
-              
-              <Tabs
-                value={tokenLimit.toString()}
-                className="w-auto"
-                onValueChange={(value) => {
-                  setTokenLimit(parseInt(value) as 10 | 25 | 50 | 100);
-                }}
-              >
-                <TabsList className="bg-blue-900/50">
-                  <TabsTrigger value="10" className="data-[state=active]:bg-blue-700 text-blue-100">Top 10</TabsTrigger>
-                  <TabsTrigger value="25" className="data-[state=active]:bg-blue-700 text-blue-100">Top 25</TabsTrigger>
-                  <TabsTrigger value="50" className="data-[state=active]:bg-blue-700 text-blue-100">Top 50</TabsTrigger>
-                  <TabsTrigger value="100" className="data-[state=active]:bg-blue-700 text-blue-100">Top 100</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-          </div>
-          
-          {/* Mobile filters - only visible on small screens */}
-          <div className="sm:hidden w-full mb-1">
-            <button
-              onClick={() => setIsFilterMenuOpen(!isFilterMenuOpen)}
-              className="w-full flex items-center justify-between px-3 py-1 bg-blue-800/60 rounded-md text-blue-100 hover:bg-blue-700/70 transition-colors" 
-            >
-              <span>Filters</span>
-              <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                width="16" 
-                height="16" 
-                viewBox="0 0 24 24" 
-                fill="none" 
-                stroke="currentColor" 
-                strokeWidth="2" 
-                strokeLinecap="round" 
-                strokeLinejoin="round"
-                className={`transition-transform ${isFilterMenuOpen ? 'rotate-180' : ''}`}
-              >
-                <polyline points="6 9 12 15 18 9"></polyline>
-              </svg>
-            </button>
-            
-            {/* Collapsible filter menu for small screens with animations */}
-            {isFilterMenuOpen && (
-              <div className="mt-1 p-2 bg-blue-900/70 rounded-md border border-blue-800/50 shadow-lg"> {/* Reduced margin and padding */}
-                <div className="flex flex-col gap-3">
-                  <div>
-                    <p className="text-xs text-blue-300 mb-1">Time Period</p>
-                    <Tabs
-                      value={timeframe}
-                      className="w-full"
-                      onValueChange={(value) => setTimeframe(value as "m5" | "h1" | "h6" | "h24")}
-                    >
-                      <TabsList className="bg-blue-900/50 w-full">
-                        <TabsTrigger value="m5" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">5m</TabsTrigger>
-                        <TabsTrigger value="h1" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">1h</TabsTrigger>
-                        <TabsTrigger value="h6" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">6h</TabsTrigger>
-                        <TabsTrigger value="h24" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">24h</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                  </div>
-                  
-                  <div>
-                    <p className="text-xs text-blue-300 mb-1">Direction</p>
-                    <div className="flex bg-blue-900/50 rounded-md p-0.5 w-full">
-                      <button
-                        onClick={() => {
-                          setShowUpOnly(!showUpOnly);
-                          if (!showUpOnly && showDownOnly) setShowDownOnly(false);
-                        }}
-                        className={`flex-1 px-3 py-1 rounded-sm text-sm transition-colors ${
-                          showUpOnly ? 'bg-blue-700 text-blue-100' : 'text-blue-300 hover:text-blue-100'
-                        }`}
-                      >
-                        Up only 🟢
-                      </button>
-                      <button
-                        onClick={() => {
-                          setShowDownOnly(!showDownOnly);
-                          if (!showDownOnly && showUpOnly) setShowUpOnly(false);
-                        }}
-                        className={`flex-1 px-3 py-1 rounded-sm text-sm ml-1 transition-colors ${
-                          showDownOnly ? 'bg-blue-700 text-blue-100' : 'text-blue-300 hover:text-blue-100'
-                        }`}
-                      >
-                        Down only 🔴
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <p className="text-xs text-blue-300 mb-1">Token Count</p>
-                    <Tabs
-                      value={tokenLimit.toString()}
-                      className="w-full"
-                      onValueChange={(value) => {
-                        setTokenLimit(parseInt(value) as 10 | 25 | 50 | 100);
-                      }}
-                    >
-                      <TabsList className="bg-blue-900/50 w-full">
-                        <TabsTrigger value="10" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">10</TabsTrigger>
-                        <TabsTrigger value="25" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">25</TabsTrigger>
-                        <TabsTrigger value="50" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">50</TabsTrigger>
-                        <TabsTrigger value="100" className="flex-1 data-[state=active]:bg-blue-700 text-blue-100">100</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* Mobile description - only visible on small screens */}
-          <div className="sm:hidden relative mt-1 mb-3">
-            <div className="inline-flex items-center group">
-              <span className="text-blue-300 text-sm font-semibold">Ronin Tokens Performance ({formatTimeframe(timeframe)})</span>
-              <div className="relative inline-block ml-1.5">
-                <Info className="h-4 w-4 text-blue-300 cursor-help" />
-                <div className="invisible group-hover:visible absolute bottom-full left-1/2 transform -translate-x-1/2 -translate-y-2 
-                              w-64 p-2 bg-blue-950 text-blue-100 text-xs rounded shadow-lg border border-blue-700
-                              opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-50">
-                  Bubble size represents the magnitude of price change. Click empty space to repel bubbles. Click on a bubble for details.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Refresh timer - just the progress bar */}
-          <div className="text-blue-300 mt-0">
-            <div className="w-full bg-blue-900/30 h-1 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-blue-400 transition-all duration-1000 ease-linear"
-                style={{ width: `${(timeRemaining / 30) * 100}%` }}
-              />
-            </div>
-          </div>
-        </CardHeader>
+        <BubbleHeader
+          title="Token"
+          activeView={activeView}
+          onViewChange={handleViewChange}
+          timeframe={timeframe}
+          onTimeframeChange={(value) => setTimeframe(value)}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          showUpOnly={showUpOnly}
+          onShowUpOnlyChange={setShowUpOnly}
+          showDownOnly={showDownOnly}
+          onShowDownOnlyChange={setShowDownOnly}
+          tokenLimit={tokenLimit}
+          onTokenLimitChange={setTokenLimit}
+          timeRemaining={timeRemaining}
+          searchPlaceholder="Search tokens..."
+          description="Ronin Tokens Performance"
+        />
         <CardContent className="pt-1"> {/* Reduced top padding */}
           <div ref={containerRef} className="w-full h-[80vh] relative bg-[#061325] rounded-md">
             {loading ? (
@@ -882,10 +699,24 @@ export default function CryptoBubbles() {
           </div>
         </CardContent>
       </Card>
-
-      <AnimatePresence>
-        {selectedCrypto && <CryptoDetails crypto={selectedCrypto} timeframe={timeframe} onClose={closeDetails} shareToTwitter={shareToTwitter} />}
-      </AnimatePresence>
+        <AnimatePresence>
+          {selectedCrypto && (
+            <CryptoDetails 
+              crypto={selectedCrypto} 
+              timeframe={timeframe} 
+              onClose={closeDetails} 
+              shareToTwitter={shareToTwitter}
+              onViewTrades={() => {
+                // Close the current modal
+                closeDetails();
+                
+                // Navigate to the trades page for this token
+                const tokenIdentifier = selectedCrypto.id;
+                window.location.href = `/token/${tokenIdentifier}`;
+              }}
+            />
+          )}
+        </AnimatePresence>
     </div>
   )
 }

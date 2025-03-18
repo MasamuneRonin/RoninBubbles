@@ -9,14 +9,16 @@ import { formatCurrency } from "@/lib/utils"
 import { CryptoData } from "./crypto-bubbles"
 
 
+
 interface CryptoDetailsProps {
   crypto: CryptoData
   timeframe: "m5" | "h1" | "h6" | "h24"
   onClose: () => void
-  shareToTwitter: (crypto: CryptoData) => void  // Add this line
+  shareToTwitter: (crypto: CryptoData) => void
+  onViewTrades: () => void // Add this prop
 }
 
-export default function CryptoDetails({ crypto, timeframe, onClose, shareToTwitter }: CryptoDetailsProps) {
+export default function CryptoDetails({ crypto, timeframe, onClose, shareToTwitter, onViewTrades }: CryptoDetailsProps) {
   // Get percentage change based on selected timeframe
   const getPercentageChange = () => {
     switch (timeframe) {
@@ -180,15 +182,9 @@ export default function CryptoDetails({ crypto, timeframe, onClose, shareToTwitt
           <CardFooter className="flex flex-col gap-3">
             <Button
               className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={() => {
-                // Extract the token address from crypto.id (handling prefixed addresses)
-                const tokenAddress = crypto.id;
-          
-                // Open the Ronin swap page with the token as the output currency
-                window.open(`https://app.roninchain.com/swap?outputCurrency=${tokenAddress}`, '_blank');
-              }}
+              onClick={onViewTrades}
             >
-              Buy {crypto.symbol.toUpperCase()}
+              View Trade Bubbles
             </Button>
             
             <Button
@@ -201,6 +197,7 @@ export default function CryptoDetails({ crypto, timeframe, onClose, shareToTwitt
               Share to X
             </Button>
           </CardFooter>
+
         </Card>
       </motion.div>
     </motion.div>
